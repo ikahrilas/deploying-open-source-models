@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>deploying-open-source-models: architecture</title>
+<style>
+  :root {
+    --bg: #0f172a; --card: #1e293b; --line: #475569; --text: #e2e8f0; --muted: #94a3b8;
+    --api: #38bdf8; --ml: #f472b6; --hub: #fbbf24; --cfg: #a3e635; --script: #c4b5fd;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 32px; background: var(--bg); color: var(--text);
+         font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  h1 { margin: 0 0 4px; font-size: 24px; }
+  h2 { margin: 36px 0 12px; font-size: 16px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  p.sub { margin: 0; color: var(--muted); }
+  .row { display: flex; gap: 16px; align-items: stretch; flex-wrap: wrap; }
+  .card { background: var(--card); border: 1px solid var(--line); border-top-width: 4px;
+          border-radius: 8px; padding: 14px 16px; flex: 1 1 220px; min-width: 220px; }
+  .card h3 { margin: 0 0 6px; font-size: 15px; }
+  .card code, .tag { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .card ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
+  .tag { display: inline-block; padding: 1px 7px; border-radius: 99px; background: #0b1222; color: var(--muted); margin-right: 4px; }
+  .api { border-top-color: var(--api); } .ml { border-top-color: var(--ml); }
+  .hub { border-top-color: var(--hub); } .cfg { border-top-color: var(--cfg); } .script { border-top-color: var(--script); }
+  .arrow { align-self: center; font-size: 22px; color: var(--muted); flex: 0 0 auto; }
+  .flow { display: flex; align-items: stretch; gap: 10px; flex-wrap: wrap; }
+  .step { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+          flex: 1 1 130px; min-width: 130px; text-align: center; }
+  .step b { display: block; color: var(--api); font-size: 12px; margin-bottom: 2px; }
+  .step small { color: var(--muted); }
+  .box { border: 2px dashed var(--line); border-radius: 12px; padding: 16px; margin-top: 8px; }
+  .box > .label { margin: -28px 0 10px; background: var(--bg); display: inline-block; padding: 0 8px; color: var(--muted); font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #334155; vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+  td code { color: var(--script); }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 12px; color: var(--muted); font-size: 12px; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+</style>
+</head>
+<body>
+
+<h1>deploying-open-source-models</h1>
+<p class="sub">Summarizing customer-support call transcripts with FLAN-T5-small, served over HTTP with FastAPI.</p>
+
+<div class="legend">
+  <span><span class="dot" style="background:var(--api)"></span>Serving</span>
+  <span><span class="dot" style="background:var(--ml)"></span>ML runtime</span>
+  <span><span class="dot" style="background:var(--hub)"></span>Model hub</span>
+  <span><span class="dot" style="background:var(--cfg)"></span>Config / tooling</span>
+  <span><span class="dot" style="background:var(--script)"></span>Scripts</span>
+</div>
+
+<h2>Runtime architecture (main.py)</h2>
+<div class="row">
+  <div class="card script">
+    <h3>Client</h3>
+    <code>POST /summarize</code>
+    <ul><li><code>text</code> (required)</li><li><code>max_length</code> = 150</li><li><code>min_length</code> = 15</li></ul>
+  </div>
+  <div class="arrow">&rarr;</div>
+  <div class="card api">
+    <h3>uvicorn + FastAPI + pydantic</h3>
+    <span class="tag">uvicorn</span><span class="tag">fastapi</span>
+    <ul>
+      <li>uvicorn: ASGI server</li>
+      <li>FastAPI: routing, threadpool for sync handler</li>
+      <li>pydantic: validates request (<code>extra=forbid</code>) and response</li>
+      <li>Empty text &rarr; 422, errors &rarr; 500</li>
+    </ul>
+  </div>
+  <div class="arrow">&rarr;</div>
+  <div class="card ml">
+    <h3>transformers + torch</h3>
+    <span class="tag">transformers</span><span class="tag">torch</span>
+    <ul>
+      <li>Tokenizer (max 512 tokens)</li>
+      <li>FLAN-T5-small seq2seq model</li>
+      <li>Beam search, 4 beams, <code>no_grad</code></li>
+      <li>CUDA fp16, otherwise CPU fp32</li>
+    </ul>
+  </div>
+  <div class="arrow">&rarr;</div>
+  <div class="card script">
+    <h3>Response</h3>
+    <code>{ "summary": "..." }</code>
+  </div>
+</div>
+
+<div class="row" style="margin-top:16px">
+  <div class="card hub">
+    <h3>huggingface-hub</h3>
+    <span class="tag">huggingface-hub</span>
+    <ul><li>Downloads <code>google/flan-t5-small</code> weights once, then caches locally (used by transformers at startup)</li>
+        <li><code>InferenceClient</code> for the hosted API (explore.py)</li>
+        <li><code>scan_cache_dir</code> (check_cache.py)</li></ul>
+  </div>
+  <div class="card cfg">
+    <h3>python-dotenv</h3>
+    <span class="tag">python-dotenv</span>
+    <ul><li>Loads <code>.env</code> (e.g. <code>HF_TOKEN</code>); .env is gitignored</li></ul>
+  </div>
+  <div class="card cfg">
+    <h3>uv + uv_build</h3>
+    <ul><li>Dependency pinning (<code>uv.lock</code>), Python &ge; 3.12</li><li>Package skeleton in <code>src/</code> is unused boilerplate</li></ul>
+  </div>
+</div>
+
+<h2>Request lifecycle</h2>
+<div class="flow">
+  <div class="step"><b>1. Validate</b><small>pydantic schema, reject blank text</small></div>
+  <div class="arrow">&rarr;</div>
+  <div class="step"><b>2. Prompt</b><small>prefix "Summarize the following dialogue:"</small></div>
+  <div class="arrow">&rarr;</div>
+  <div class="step"><b>3. Tokenize</b><small>truncate to 512, move to device</small></div>
+  <div class="arrow">&rarr;</div>
+  <div class="step"><b>4. Generate</b><small>beam search with min/max length</small></div>
+  <div class="arrow">&rarr;</div>
+  <div class="step"><b>5. Decode</b><small>token IDs &rarr; text, skip special tokens</small></div>
+</div>
+<div class="box" style="margin-top:28px">
+  <span class="label">Startup (once, at import)</span>
+  load_dotenv &rarr; pick device &rarr; load tokenizer + model (from HF cache or download) &rarr; <code>model.to(device).eval()</code>
+</div>
+
+<h2>How the scripts evolve toward main.py</h2>
+<table>
+  <tr><th>File</th><th>Packages</th><th>What it does</th></tr>
+  <tr><td><code>explore.py</code></td><td>huggingface-hub, dotenv</td><td>Baseline: calls hosted <code>facebook/bart-large-cnn</code> via the HF Inference API (needs <code>HF_TOKEN</code>).</td></tr>
+  <tr><td><code>explore_local.py</code></td><td>transformers</td><td>First local run of FLAN-T5 on one hardcoded ticket, CPU only.</td></tr>
+  <tr><td><code>explore_safe.py</code></td><td>transformers, torch</td><td>Adds device selection, fp16 on GPU, input validation, try/except returning <code>None</code>.</td></tr>
+  <tr><td><code>explore_batch.py</code></td><td>transformers, torch</td><td><code>summarize_batch()</code>: padding, attention mask, batches of 8, <code>batch_decode</code>.</td></tr>
+  <tr><td><code>check_cache.py</code></td><td>huggingface-hub</td><td>Reports size of cached models on disk.</td></tr>
+  <tr><td><code>main.py</code></td><td>fastapi, uvicorn, pydantic, transformers, torch, dotenv</td><td>Wraps the single-text logic in a validated <code>/summarize</code> HTTP endpoint.</td></tr>
+</table>
+
+</body>
+</html>
