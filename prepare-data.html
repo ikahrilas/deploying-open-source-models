@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>prepare_data.py — Simplified</title>
+<style>
+  :root {
+    --ink: #1f2933; --muted: #616e7c; --line: #cbd2d9;
+    --blue: #1971c2; --blue-bg: #e7f1fb;
+    --orange: #e8590c; --orange-bg: #fff0e6;
+    --green: #2f9e44; --green-bg: #ebfbee;
+    --purple: #7048e8; --purple-bg: #f3f0ff;
+    --grey: #9aa5b1; --grey-bg: #e4e8ec; --bad: #c92a2a;
+  }
+  * { box-sizing: border-box; }
+  body { font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         color: var(--ink); max-width: 920px; margin: 0 auto; padding: 32px 24px 80px; background: #fafbfc; }
+  h1 { font-size: 28px; margin-bottom: 4px; }
+  h2 { font-size: 21px; margin-top: 48px; padding-top: 16px; border-top: 2px solid var(--line); }
+  h3 { font-size: 17px; margin-top: 28px; }
+  .sub { color: var(--muted); margin-top: 0; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 18px 22px; margin: 18px 0; }
+  .rule { background: var(--blue-bg); border-left: 4px solid var(--blue); padding: 10px 16px; border-radius: 6px; margin: 16px 0; }
+  .warn { background: var(--orange-bg); border-left: 4px solid var(--orange); padding: 10px 16px; border-radius: 6px; margin: 16px 0; }
+  ol li, ul li { margin: 4px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 15px; }
+  th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #f0f3f6; }
+  code { font: 14px/1.4 "SF Mono", Menlo, monospace; background: #eef1f4; padding: 1px 5px; border-radius: 4px; }
+  pre { background: #1f2933; color: #e4e7eb; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 14px; line-height: 1.5; }
+  pre .c { color: #8fd18f; }
+  pre .h { background: #3e4c59; border-radius: 3px; }
+  svg { display: block; margin: 12px auto; max-width: 100%; height: auto; }
+  svg text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .caption { text-align: center; font-size: 14px; color: var(--muted); margin-top: -4px; }
+  .tok { display: inline-block; margin: 3px 2px; text-align: center; font: 13px/1.3 "SF Mono", Menlo, monospace; }
+  .tok span { display: block; padding: 3px 6px; border: 1px solid var(--line); }
+  .tok .t { background: var(--blue-bg); border-radius: 4px 4px 0 0; }
+  .tok .i { background: #fff; border-top: 0; border-radius: 0 0 4px 4px; color: var(--muted); }
+  .tok.p .t { background: var(--purple-bg); }
+  .tok.e .t { background: var(--orange-bg); }
+  .step { display: inline-block; background: var(--ink); color: #fff; border-radius: 50%; width: 24px; height: 24px;
+          text-align: center; line-height: 24px; font-size: 13px; font-weight: 600; margin-right: 6px; }
+</style>
+</head>
+<body>
+
+<h1>How <code>prepare_data.py</code> works</h1>
+<p class="sub">This script changes text into numbers. A model can then train on these numbers.</p>
+
+<div class="card">
+  <strong>Words in this page</strong>
+  <table>
+    <tr><th>Word</th><th>Meaning</th></tr>
+    <tr><td><b>Dataset</b></td><td>A large set of examples. Each example is one row with named columns.</td></tr>
+    <tr><td><b>Split</b></td><td>One part of the dataset. The <i>train</i> split teaches the model. The <i>test</i> split measures the model.</td></tr>
+    <tr><td><b>Token</b></td><td>A small piece of text. A token can be a word, part of a word, or a punctuation mark.</td></tr>
+    <tr><td><b>Token ID</b></td><td>The number for one token. The model sees only token IDs, not text.</td></tr>
+    <tr><td><b>Tokenizer</b></td><td>The tool that changes text into token IDs. It can also change token IDs back into text.</td></tr>
+    <tr><td><b>Input</b></td><td>The text that you give to the model. Here, this is the dialogue.</td></tr>
+    <tr><td><b>Label</b></td><td>The correct answer. Here, this is the human-written summary.</td></tr>
+    <tr><td><b>Tensor</b></td><td>A grid of numbers. PyTorch uses tensors for all calculations.</td></tr>
+  </table>
+</div>
+
+<!-- ============================================================ -->
+<h2>1. The full process</h2>
+
+<p>The script does five steps. Each step makes the data more ready for training.</p>
+
+<svg viewBox="0 0 880 210" width="880">
+  <defs>
+    <marker id="ar" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#616e7c"/>
+    </marker>
+  </defs>
+  <!-- boxes -->
+  <g font-size="13" text-anchor="middle">
+    <rect x="10"  y="40" width="150" height="80" rx="10" fill="#e7f1fb" stroke="#1971c2"/>
+    <text x="85" y="68" font-weight="600">1. Load</text>
+    <text x="85" y="88">Get DialogSum</text>
+    <text x="85" y="106" fill="#616e7c">load_dataset()</text>
+
+    <rect x="185" y="40" width="150" height="80" rx="10" fill="#e7f1fb" stroke="#1971c2"/>
+    <text x="260" y="68" font-weight="600">2. Select</text>
+    <text x="260" y="88">Keep 50 + 10 rows</text>
+    <text x="260" y="106" fill="#616e7c">.select(range(n))</text>
+
+    <rect x="360" y="40" width="160" height="80" rx="10" fill="#f3f0ff" stroke="#7048e8"/>
+    <text x="440" y="68" font-weight="600">3. Tokenize</text>
+    <text x="440" y="88">Text → token IDs</text>
+    <text x="440" y="106" fill="#616e7c">tokenize()</text>
+
+    <rect x="545" y="40" width="150" height="80" rx="10" fill="#f3f0ff" stroke="#7048e8"/>
+    <text x="620" y="68" font-weight="600">4. Map</text>
+    <text x="620" y="88">Apply to all rows</text>
+    <text x="620" y="106" fill="#616e7c">.map(batched=True)</text>
+
+    <rect x="720" y="40" width="150" height="80" rx="10" fill="#ebfbee" stroke="#2f9e44"/>
+    <text x="795" y="68" font-weight="600">5. Format</text>
+    <text x="795" y="88">Lists → tensors</text>
+    <text x="795" y="106" fill="#616e7c">set_format("torch")</text>
+  </g>
+  <g stroke="#616e7c" stroke-width="2" marker-end="url(#ar)">
+    <line x1="160" y1="80" x2="183" y2="80"/>
+    <line x1="335" y1="80" x2="358" y2="80"/>
+    <line x1="520" y1="80" x2="543" y2="80"/>
+    <line x1="695" y1="80" x2="718" y2="80"/>
+  </g>
+  <!-- data shape row -->
+  <g font-size="12" text-anchor="middle" fill="#616e7c">
+    <text x="85"  y="150">text columns</text>
+    <text x="85"  y="166">12,460 train rows</text>
+    <text x="260" y="150">text columns</text>
+    <text x="260" y="166">50 train rows</text>
+    <text x="530" y="150">number columns (Python lists)</text>
+    <text x="530" y="166">input_ids, attention_mask, labels</text>
+    <text x="795" y="150">number columns</text>
+    <text x="795" y="166">PyTorch tensors</text>
+  </g>
+  <line x1="10" y1="135" x2="870" y2="135" stroke="#cbd2d9" stroke-dasharray="4 4"/>
+  <text x="440" y="196" font-size="12" text-anchor="middle" fill="#9aa5b1">What the data looks like after each step</text>
+</svg>
+
+<div class="rule">
+  <b>The main idea:</b> A model cannot read text. It reads only numbers. This script is a translator from text to numbers.
+</div>
+
+<!-- ============================================================ -->
+<h2>2. The task: summarize a dialogue</h2>
+
+<p>The script prepares data for <b>summarization</b>. The model reads a conversation. Then it writes a short summary.</p>
+
+<p>The model is <code>google/flan-t5-small</code>. T5 is an <b>encoder-decoder</b> model. It has two parts:</p>
+<ul>
+  <li>The <b>encoder</b> reads the input. It makes a numeric description of the meaning.</li>
+  <li>The <b>decoder</b> uses this description. It writes the output one token at a time.</li>
+</ul>
+
+<svg viewBox="0 0 860 200" width="860">
+  <g font-size="13">
+    <rect x="10" y="30" width="230" height="140" rx="10" fill="#fff" stroke="#cbd2d9"/>
+    <text x="22" y="52" font-weight="600">Input (dialogue)</text>
+    <text x="22" y="76" fill="#616e7c" font-size="12">#Person1#: Hi, Mr. Smith. I'm</text>
+    <text x="22" y="94" fill="#616e7c" font-size="12">Doctor Hawkins. Why are you</text>
+    <text x="22" y="112" fill="#616e7c" font-size="12">here today?</text>
+    <text x="22" y="130" fill="#616e7c" font-size="12">#Person2#: I found it would be</text>
+    <text x="22" y="148" fill="#616e7c" font-size="12">a good idea to get a check-up. …</text>
+
+    <rect x="290" y="55" width="120" height="90" rx="10" fill="#e7f1fb" stroke="#1971c2"/>
+    <text x="350" y="96" text-anchor="middle" font-weight="600">Encoder</text>
+    <text x="350" y="116" text-anchor="middle" font-size="12" fill="#616e7c">reads</text>
+
+    <rect x="450" y="55" width="120" height="90" rx="10" fill="#fff0e6" stroke="#e8590c"/>
+    <text x="510" y="96" text-anchor="middle" font-weight="600">Decoder</text>
+    <text x="510" y="116" text-anchor="middle" font-size="12" fill="#616e7c">writes</text>
+
+    <rect x="620" y="30" width="230" height="140" rx="10" fill="#fff" stroke="#cbd2d9"/>
+    <text x="632" y="52" font-weight="600">Output (summary)</text>
+    <text x="632" y="76" fill="#616e7c" font-size="12">Mr. Smith's getting a check-up,</text>
+    <text x="632" y="94" fill="#616e7c" font-size="12">and Doctor Hawkins advises him</text>
+    <text x="632" y="112" fill="#616e7c" font-size="12">to have one every year. …</text>
+  </g>
+  <g stroke="#616e7c" stroke-width="2" marker-end="url(#ar)">
+    <line x1="240" y1="100" x2="288" y2="100"/>
+    <line x1="410" y1="100" x2="448" y2="100"/>
+    <line x1="570" y1="100" x2="618" y2="100"/>
+  </g>
+  <text x="264" y="92" font-size="11" text-anchor="middle" fill="#7048e8">input_ids</text>
+  <text x="594" y="92" font-size="11" text-anchor="middle" fill="#e8590c">labels</text>
+</svg>
+<p class="caption">The input goes into the encoder. The labels are what the decoder must learn to write.</p>
+
+<p>This is why each example needs <b>two</b> sets of token IDs. The <code>input_ids</code> go to the encoder. The <code>labels</code> tell the decoder the correct answer.</p>
+
+<!-- ============================================================ -->
+<h2>3. Load and select the data</h2>
+
+<pre><span class="c"># lines 12–14</span>
+full_dataset = load_dataset(<span class="h">"knkarthick/dialogsum"</span>)
+train_data = full_dataset[<span class="h">"train"</span>].select(range(50))
+test_data  = full_dataset[<span class="h">"test"</span>].select(range(10))</pre>
+
+<p><code>load_dataset</code> downloads DialogSum from the Hugging Face Hub. It stores a copy on your disk. The next run uses this copy.</p>
+
+<p>DialogSum has three splits. Each row has four columns: <code>id</code>, <code>dialogue</code>, <code>summary</code>, and <code>topic</code>.</p>
+
+<svg viewBox="0 0 860 170" width="860">
+  <g font-size="13">
+    <text x="10" y="22" font-weight="600">Full dataset</text>
+    <rect x="10"  y="32" width="700" height="34" fill="#e7f1fb" stroke="#1971c2"/>
+    <text x="360" y="54" text-anchor="middle">train — 12,460 rows</text>
+    <rect x="710" y="32" width="28"  height="34" fill="#f0f3f6" stroke="#9aa5b1"/>
+    <rect x="738" y="32" width="84"  height="34" fill="#fff0e6" stroke="#e8590c"/>
+    <text x="780" y="54" text-anchor="middle" font-size="12">test 1,500</text>
+    <text x="724" y="84" text-anchor="middle" font-size="11" fill="#616e7c">validation 500</text>
+    <text x="724" y="98" text-anchor="middle" font-size="11" fill="#616e7c">(not used)</text>
+
+    <text x="10" y="122" font-weight="600">What the script keeps</text>
+    <rect x="10"  y="132" width="3"  height="30" fill="#1971c2"/>
+    <text x="20"  y="152">first 50 train rows (0.4%)</text>
+    <rect x="738" y="132" width="3"  height="30" fill="#e8590c"/>
+    <text x="748" y="152">first 10 test rows</text>
+  </g>
+</svg>
+<p class="caption">Bar width shows the number of rows. The script uses a very small part.</p>
+
+<div class="rule">
+  <b>Why so few rows?</b> A small subset makes each run fast. You can find errors in seconds, not hours. Use more rows when the code works correctly.
+</div>
+
+<p><code>.select(range(50))</code> keeps rows 0 to 49. It does not pick rows at random. For a random sample, use <code>.shuffle(seed=42).select(range(50))</code>.</p>
+
+<!-- ============================================================ -->
+<h2>4. Tokenization</h2>
+
+<p>The tokenizer must match the model. Each model learns its own list of tokens, called the <b>vocabulary</b>. <code>AutoTokenizer.from_pretrained(MODEL_NAME)</code> loads the correct tokenizer for Flan-T5.</p>
+
+<h3>From text to token IDs</h3>
+<p>Below are the first tokens from the first training example. These are real values from the script.</p>
+
+<div class="card">
+  <div>
+    <div class="tok p"><span class="t">▁Sum</span><span class="i">12198</span></div>
+    <div class="tok p"><span class="t">mar</span><span class="i">1635</span></div>
+    <div class="tok p"><span class="t">ize</span><span class="i">1737</span></div>
+    <div class="tok p"><span class="t">▁the</span><span class="i">8</span></div>
+    <div class="tok p"><span class="t">▁following</span><span class="i">826</span></div>
+    <div class="tok p"><span class="t">▁dialogue</span><span class="i">7478</span></div>
+    <div class="tok p"><span class="t">:</span><span class="i">10</span></div>
+    <div class="tok"><span class="t">▁#</span><span class="i">1713</span></div>
+    <div class="tok"><span class="t">P</span><span class="i">345</span></div>
+    <div class="tok"><span class="t">erson</span><span class="i">13515</span></div>
+    <div class="tok"><span class="t">1</span><span class="i">536</span></div>
+    <div class="tok"><span class="t">#</span><span class="i">4663</span></div>
+    <div class="tok"><span class="t">:</span><span class="i">10</span></div>
+    <div class="tok"><span class="t">▁Hi</span><span class="i">2018</span></div>
+    <div class="tok"><span class="t">,</span><span class="i">6</span></div>
+    <div class="tok"><span class="t">▁Mr</span><span class="i">1363</span></div>
+    <div class="tok"><span class="t">.</span><span class="i">5</span></div>
+    <div class="tok"><span class="t">▁Smith</span><span class="i">3931</span></div>
+    <span style="color:var(--muted)"> … </span>
+    <div class="tok e"><span class="t">&lt;/s&gt;</span><span class="i">1</span></div>
+  </div>
+  <p style="font-size:14px;color:var(--muted);margin-bottom:0">
+    <span class="sw" style="display:inline-block;width:12px;height:12px;background:var(--purple-bg);border:1px solid var(--line)"></span> prefix &nbsp;
+    <span class="sw" style="display:inline-block;width:12px;height:12px;background:var(--blue-bg);border:1px solid var(--line)"></span> dialogue &nbsp;
+    <span class="sw" style="display:inline-block;width:12px;height:12px;background:var(--orange-bg);border:1px solid var(--line)"></span> end-of-sequence token
+  </p>
+</div>
+
+<p>Look at these points:</p>
+<ul>
+  <li><b>Words can split.</b> "Summarize" becomes three tokens: <code>▁Sum</code>, <code>mar</code>, <code>ize</code>. A rare word uses more tokens than a common word.</li>
+  <li><b>The <code>▁</code> mark shows a space.</b> It tells the tokenizer that a new word starts here.</li>
+  <li><b>The tokenizer adds <code>&lt;/s&gt;</code> at the end.</b> This token (ID 1) tells the model "the text stops here".</li>
+  <li><b>Same token, same ID.</b> The colon <code>:</code> is always ID 10.</li>
+</ul>
+
+<h3>The attention mask</h3>
+<p>The tokenizer also makes an <code>attention_mask</code>. It has one number for each token. A <b>1</b> means "use this token". A <b>0</b> means "ignore this token, it is only padding". At this step, all values are 1, because the script does not add padding. See <a href="#pad">Section 9</a>.</p>
+
+<!-- ============================================================ -->
+<h2>5. The prompt prefix</h2>
+
+<pre><span class="c"># lines 19, 22</span>
+PREFIX = <span class="h">"Summarize the following dialogue:\n\n"</span>
+prompts = [PREFIX + d <span class="c">for</span> d <span class="c">in</span> examples[<span class="h">"dialogue"</span>]]</pre>
+
+<p>The script adds an instruction to the start of each dialogue. Why?</p>
+
+<p>Flan-T5 is <b>instruction-tuned</b>. Google trained it on many tasks. Each task started with a text instruction, for example "Translate to German:" or "Summarize:". So the model already knows how to follow instructions.</p>
+
+<p>When the prefix tells the model the task, fine-tuning starts from a better point. The model already knows what "summarize" means. It only learns the style of DialogSum summaries.</p>
+
+<div class="rule">
+  <b>Rule:</b> Use the same prefix at training time and at prediction time. If you change the prefix, the model can give worse results.
+</div>
+
+<div class="warn">
+  <b>Note:</b> The T5 tokenizer removes newlines. The <code>\n\n</code> in the prefix does not become a token. Look at the token list above: <code>:</code> goes directly to <code>▁#</code>. This causes no problem, but the newlines have no effect.
+</div>
+
+<!-- ============================================================ -->
+<h2>6. Truncation and maximum length</h2>
+
+<pre><span class="c"># lines 23–27</span>
+model_inputs = tokenizer(prompts, <span class="h">max_length=128</span>, <span class="h">truncation=True</span>)</pre>
+
+<p><code>max_length=128</code> sets a limit. <code>truncation=True</code> tells the tokenizer to cut any text that is longer than this limit. The tokenizer removes the tokens at the end. It keeps the <code>&lt;/s&gt;</code> token.</p>
+
+<p>Why use a limit? Longer inputs use more memory and more time. The memory for attention increases with the square of the length.</p>
+
+<svg viewBox="0 0 860 150" width="860">
+  <g font-size="13">
+    <text x="10" y="20" font-weight="600">First training example: 291 tokens</text>
+    <rect x="10"  y="30" width="320" height="36" fill="#e7f1fb" stroke="#1971c2"/>
+    <text x="170" y="53" text-anchor="middle">kept: 128 tokens</text>
+    <rect x="330" y="30" width="408" height="36" fill="#f0f3f6" stroke="#9aa5b1" stroke-dasharray="5 3"/>
+    <text x="534" y="53" text-anchor="middle" fill="#616e7c">removed: 163 tokens</text>
+    <line x1="330" y1="22" x2="330" y2="76" stroke="#c92a2a" stroke-width="2"/>
+    <text x="330" y="92" text-anchor="middle" fill="#c92a2a" font-size="12">cut at 128</text>
+    <text x="10" y="122" font-size="12" fill="#616e7c">The model sees only the start of the dialogue. It does not see how the conversation ends.</text>
+  </g>
+</svg>
+
+<div class="warn">
+  <b>Important:</b> In the 50 training rows, <b>44 inputs are longer than 128 tokens</b>. The median input length is 193 tokens. The longest is 459 tokens.
+  The model often does not see the end of the dialogue. But the summary often talks about the end.
+  The model must then guess facts that it cannot see. Think about a larger <code>max_length</code>, for example 512.
+</div>
+
+<p>The summaries are shorter. The limit for labels is 64 tokens. Only 3 of 50 summaries are longer than 64. The median summary is about 35 tokens.</p>
+
+<table>
+  <tr><th></th><th>Limit</th><th>Median length</th><th>Rows cut (of 50)</th></tr>
+  <tr><td>Input (prefix + dialogue)</td><td>128</td><td>193</td><td style="color:var(--bad)"><b>44</b></td></tr>
+  <tr><td>Label (summary)</td><td>64</td><td>~35</td><td>3</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2>7. Make the labels</h2>
+
+<pre><span class="c"># lines 28–33</span>
+labels = tokenizer(<span class="h">text_target</span>=examples[<span class="h">"summary"</span>], max_length=64, truncation=True)
+model_inputs[<span class="h">"labels"</span>] = labels[<span class="h">"input_ids"</span>]</pre>
+
+<p>The script tokenizes the summary a second time, as a <b>target</b>. The <code>text_target</code> argument tells the tokenizer "this is the output text". For T5, the result is the same as normal tokenization. Some other models use different rules for targets, so this argument keeps the code correct for all models.</p>
+
+<p>Then the script takes only the <code>input_ids</code> from the summary. It stores them in a new key called <code>labels</code>. The model looks for this key name during training.</p>
+
+<svg viewBox="0 0 860 240" width="860">
+  <g font-size="13">
+    <!-- left: one example -->
+    <rect x="10" y="20" width="200" height="60" rx="8" fill="#fff" stroke="#cbd2d9"/>
+    <text x="110" y="45" text-anchor="middle" font-weight="600">dialogue</text>
+    <text x="110" y="65" text-anchor="middle" font-size="12" fill="#616e7c">(+ prefix)</text>
+
+    <rect x="10" y="150" width="200" height="60" rx="8" fill="#fff" stroke="#cbd2d9"/>
+    <text x="110" y="185" text-anchor="middle" font-weight="600">summary</text>
+
+    <rect x="290" y="20" width="160" height="60" rx="8" fill="#f3f0ff" stroke="#7048e8"/>
+    <text x="370" y="45" text-anchor="middle">tokenizer</text>
+    <text x="370" y="65" text-anchor="middle" font-size="12" fill="#616e7c">max_length=128</text>
+
+    <rect x="290" y="150" width="160" height="60" rx="8" fill="#f3f0ff" stroke="#7048e8"/>
+    <text x="370" y="175" text-anchor="middle">tokenizer</text>
+    <text x="370" y="195" text-anchor="middle" font-size="12" fill="#616e7c">text_target, max 64</text>
+
+    <!-- result dict -->
+    <rect x="540" y="20" width="310" height="190" rx="10" fill="#ebfbee" stroke="#2f9e44"/>
+    <text x="556" y="44" font-weight="600">model_inputs (one row)</text>
+    <rect x="556" y="58"  width="278" height="36" rx="6" fill="#fff" stroke="#cbd2d9"/>
+    <text x="568" y="81"><tspan font-family="Menlo, monospace" font-size="12">input_ids</tspan>  <tspan fill="#616e7c" font-size="12">128 numbers</tspan></text>
+    <rect x="556" y="102" width="278" height="36" rx="6" fill="#fff" stroke="#cbd2d9"/>
+    <text x="568" y="125"><tspan font-family="Menlo, monospace" font-size="12">attention_mask</tspan>  <tspan fill="#616e7c" font-size="12">128 ones</tspan></text>
+    <rect x="556" y="158" width="278" height="36" rx="6" fill="#fff0e6" stroke="#e8590c"/>
+    <text x="568" y="181"><tspan font-family="Menlo, monospace" font-size="12">labels</tspan>  <tspan fill="#616e7c" font-size="12">48 numbers</tspan></text>
+
+    <text x="470" y="236" font-size="11" fill="#9aa5b1" text-anchor="middle">the summary's attention_mask is not used</text>
+  </g>
+  <g stroke="#616e7c" stroke-width="2" marker-end="url(#ar)" fill="none">
+    <line x1="210" y1="50" x2="288" y2="50"/>
+    <line x1="210" y1="180" x2="288" y2="180"/>
+    <path d="M450,40 L500,40 L500,76 L554,76"/>
+    <path d="M450,60 L490,60 L490,120 L554,120"/>
+    <line x1="450" y1="176" x2="554" y2="176"/>
+  </g>
+</svg>
+<p class="caption">Each row now has three number columns. Input and label have different lengths. This is normal.</p>
+
+<h3>How training uses the labels</h3>
+<p>During training, the model makes a guess for each label token. Then it compares the guess with the real token. The difference is the <b>loss</b>. Training changes the model to make the loss smaller.</p>
+
+<!-- ============================================================ -->
+<h2>8. Apply the function to all rows</h2>
+
+<pre><span class="c"># lines 36–40</span>
+tokenized_train = train_data.map(tokenize, <span class="h">batched=True</span>, <span class="h">remove_columns</span>=train_data.column_names)</pre>
+
+<p><code>.map()</code> runs <code>tokenize</code> on every row. It returns a new dataset. It does not change the old dataset.</p>
+
+<h3><code>batched=True</code></h3>
+<p>Without this option, <code>.map()</code> sends one row at a time. With this option, it sends a group of rows (1,000 by default). The function gets lists, not single values. That is why <code>tokenize</code> uses a loop: <code>[PREFIX + d for d in examples["dialogue"]]</code>.</p>
+
+<p>The tokenizer is fast with lists. It processes the full list in Rust code. So batched mode is much faster on large datasets.</p>
+
+<svg viewBox="0 0 860 140" width="860">
+  <g font-size="13">
+    <text x="10" y="20" font-weight="600">batched=False</text>
+    <g fill="#e7f1fb" stroke="#1971c2">
+      <rect x="130" y="6"  width="22" height="22"/><rect x="160" y="6" width="22" height="22"/>
+      <rect x="190" y="6"  width="22" height="22"/><rect x="220" y="6" width="22" height="22"/>
+      <rect x="250" y="6"  width="22" height="22"/>
+    </g>
+    <text x="290" y="22" fill="#616e7c">5 calls → tokenize gets one string each time</text>
+
+    <text x="10" y="80" font-weight="600">batched=True</text>
+    <rect x="125" y="62" width="152" height="32" rx="4" fill="none" stroke="#7048e8" stroke-width="2"/>
+    <g fill="#e7f1fb" stroke="#1971c2">
+      <rect x="130" y="67" width="22" height="22"/><rect x="160" y="67" width="22" height="22"/>
+      <rect x="190" y="67" width="22" height="22"/><rect x="220" y="67" width="22" height="22"/>
+      <rect x="250" y="67" width="22" height="22"/>
+    </g>
+    <text x="290" y="83" fill="#616e7c">1 call → tokenize gets a list of strings</text>
+  </g>
+</svg>
+
+<h3><code>remove_columns</code></h3>
+<p>This option deletes the old text columns. After tokenization, the model does not need them. If they stay, <code>set_format("torch")</code> and the trainer can fail, because they cannot change text into tensors.</p>
+
+<table>
+  <tr><th>Before <code>.map()</code></th><th>After <code>.map()</code></th></tr>
+  <tr>
+    <td><code>id</code>, <code>dialogue</code>, <code>summary</code>, <code>topic</code><br><span style="color:var(--muted)">text</span></td>
+    <td><code>input_ids</code>, <code>attention_mask</code>, <code>labels</code><br><span style="color:var(--muted)">lists of integers</span></td>
+  </tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="pad">9. Change to PyTorch format</h2>
+
+<pre><span class="c"># lines 46–47</span>
+tokenized_train.set_format(<span class="h">"torch"</span>)</pre>
+
+<p>By default, a dataset row gives Python lists. After <code>set_format("torch")</code>, a row gives PyTorch tensors. The data on disk does not change. Only the output type changes when you read a row.</p>
+
+<h3>No padding yet</h3>
+<p>The rows have different lengths. One input has 128 tokens. Another can have 90. But a batch tensor must be a rectangle. All rows in a batch must have the same length.</p>
+
+<svg viewBox="0 0 860 200" width="860">
+  <g font-size="12">
+    <text x="10" y="18" font-weight="600" font-size="13">Now (after this script)</text>
+    <rect x="10" y="28"  width="320" height="20" fill="#e7f1fb" stroke="#1971c2"/>
+    <rect x="10" y="52"  width="225" height="20" fill="#e7f1fb" stroke="#1971c2"/>
+    <rect x="10" y="76"  width="280" height="20" fill="#e7f1fb" stroke="#1971c2"/>
+    <text x="10" y="116" fill="#c92a2a">different lengths — cannot stack</text>
+
+    <text x="470" y="18" font-weight="600" font-size="13">At training time (data collator)</text>
+    <rect x="470" y="28" width="320" height="20" fill="#e7f1fb" stroke="#1971c2"/>
+    <rect x="470" y="52" width="225" height="20" fill="#e7f1fb" stroke="#1971c2"/>
+    <rect x="695" y="52" width="95"  height="20" fill="#f0f3f6" stroke="#9aa5b1" stroke-dasharray="3 2"/>
+    <rect x="470" y="76" width="280" height="20" fill="#e7f1fb" stroke="#1971c2"/>
+    <rect x="750" y="76" width="40"  height="20" fill="#f0f3f6" stroke="#9aa5b1" stroke-dasharray="3 2"/>
+    <text x="742" y="66" fill="#616e7c" text-anchor="middle">pad</text>
+    <text x="770" y="90" fill="#616e7c" text-anchor="middle">pad</text>
+    <text x="470" y="116" fill="#2f9e44">same length — one tensor</text>
+  </g>
+  <g font-size="12" fill="#616e7c">
+    <text x="10" y="150">Pad in input_ids → token ID 0, and attention_mask = 0 (the model ignores it).</text>
+    <text x="10" y="170">Pad in labels → −100 (the loss calculation ignores it).</text>
+  </g>
+</svg>
+
+<p>This script does not pad. That is a good choice. A <b>data collator</b> adds padding later, one batch at a time. It pads each batch only to the length of its longest row. This uses less memory than padding all rows to 128.</p>
+
+<div class="rule">
+  <b>Next step:</b> At training time, use <code>DataCollatorForSeq2Seq(tokenizer, model=model)</code>. It pads the inputs with 0. It pads the labels with −100, so the padding does not change the loss.
+</div>
+
+<!-- ============================================================ -->
+<h2>10. What the script prints</h2>
+
+<pre>Tokenized training examples: 50
+Tokenized test examples: 10
+
+Features: ['input_ids', 'attention_mask', 'labels']
+First input length: 128 tokens     <span class="c"># cut from 291</span>
+First label length: 48 tokens</pre>
+
+<p>Use these lines to check your work:</p>
+<ul>
+  <li>The row counts must be 50 and 10.</li>
+  <li>The features must be exactly these three. If you see <code>dialogue</code> or <code>summary</code>, <code>remove_columns</code> did not work.</li>
+  <li>An input length of exactly 128 tells you that the tokenizer cut the text.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>Summary</h2>
+
+<table>
+  <tr><th>Concept</th><th>Code</th><th>Why</th></tr>
+  <tr><td>Subset</td><td><code>.select(range(50))</code></td><td>Fast test runs.</td></tr>
+  <tr><td>Matching tokenizer</td><td><code>AutoTokenizer.from_pretrained</code></td><td>Token IDs must match the model's vocabulary.</td></tr>
+  <tr><td>Instruction prefix</td><td><code>PREFIX + d</code></td><td>Flan-T5 already knows this type of instruction.</td></tr>
+  <tr><td>Truncation</td><td><code>max_length</code>, <code>truncation=True</code></td><td>Limits memory and time. Can lose information.</td></tr>
+  <tr><td>Labels</td><td><code>text_target</code>, <code>["labels"]</code></td><td>The correct answer for the decoder.</td></tr>
+  <tr><td>Batched map</td><td><code>.map(batched=True)</code></td><td>Processes many rows in one call. Faster.</td></tr>
+  <tr><td>Remove text</td><td><code>remove_columns</code></td><td>The model needs only numbers.</td></tr>
+  <tr><td>Tensor output</td><td><code>set_format("torch")</code></td><td>PyTorch needs tensors.</td></tr>
+  <tr><td>Padding (later)</td><td><code>DataCollatorForSeq2Seq</code></td><td>Makes each batch a rectangle.</td></tr>
+</table>
+
+</body>
+</html>

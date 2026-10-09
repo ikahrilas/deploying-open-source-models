@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+from peft import PeftModel
 
 load_dotenv()
 
@@ -15,11 +16,17 @@ app = FastAPI()
 # --- Model loading (runs once when the server starts) ---
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-small")
-model = AutoModelForSeq2SeqLM.from_pretrained(
-    "google/flan-t5-small",
+MODEL_NAME = "google/flan-t5-small"
+ADAPTER_PATH = "./flan-t5-summarizer-adapter"
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+base_model = AutoModelForSeq2SeqLM.from_pretrained(
+    MODEL_NAME,
     dtype=torch.float16 if device == "cuda" else torch.float32
 )
+
+# Apply the fine-tuned LoRA adapter and merge it into the base weights
+model = PeftModel.from_pretrained(base_model, ADAPTER_PATH).merge_and_unload()
 model = model.to(device)
 model.eval()
 

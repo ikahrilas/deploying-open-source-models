@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PEFT and LoRA — Simplified</title>
+<style>
+  :root {
+    --frozen: #9aa5b1; --frozen-bg: #e4e8ec;
+    --train: #e8590c; --train-bg: #fff0e6;
+    --ink: #1f2933; --muted: #616e7c; --line: #cbd2d9;
+    --ok: #2f9e44; --bad: #c92a2a; --blue: #1971c2; --blue-bg: #e7f1fb;
+  }
+  * { box-sizing: border-box; }
+  body { font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         color: var(--ink); max-width: 920px; margin: 0 auto; padding: 32px 24px 80px; background: #fafbfc; }
+  h1 { font-size: 28px; margin-bottom: 4px; }
+  h2 { font-size: 21px; margin-top: 48px; padding-top: 16px; border-top: 2px solid var(--line); }
+  h3 { font-size: 17px; margin-top: 28px; }
+  .sub { color: var(--muted); margin-top: 0; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 18px 22px; margin: 18px 0; }
+  .rule { background: var(--blue-bg); border-left: 4px solid var(--blue); padding: 10px 16px; border-radius: 6px; margin: 16px 0; }
+  .warn { background: #fff4e6; border-left: 4px solid var(--train); padding: 10px 16px; border-radius: 6px; margin: 16px 0; }
+  ol li, ul li { margin: 4px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 15px; }
+  th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #f0f3f6; }
+  code { font: 14px/1.4 "SF Mono", Menlo, monospace; background: #eef1f4; padding: 1px 5px; border-radius: 4px; }
+  pre { background: #1f2933; color: #e4e7eb; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 14px; line-height: 1.5; }
+  pre .c { color: #8fd18f; }
+  svg { display: block; margin: 12px auto; max-width: 100%; height: auto; }
+  svg text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .legend { display: flex; gap: 18px; justify-content: center; font-size: 14px; color: var(--muted); }
+  .sw { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 5px; }
+  .caption { text-align: center; font-size: 14px; color: var(--muted); margin-top: -4px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<h1>PEFT and LoRA</h1>
+<p class="sub">How to fine-tune a model and change only a small part of it.</p>
+
+<div class="card">
+  <strong>Words in this page</strong>
+  <table>
+    <tr><th>Word</th><th>Meaning</th></tr>
+    <tr><td><b>Weight</b></td><td>One number in the model. The model has millions of weights. Training changes weights.</td></tr>
+    <tr><td><b>Base model</b></td><td>The original model before you fine-tune it.</td></tr>
+    <tr><td><b>Frozen</b></td><td>Training does not change this weight.</td></tr>
+    <tr><td><b>Trainable</b></td><td>Training changes this weight.</td></tr>
+    <tr><td><b>Adapter</b></td><td>A small set of new trainable weights. You attach it to a frozen base model.</td></tr>
+    <tr><td><b>Matrix</b></td><td>A table of weights with rows and columns. "512 × 8" means 512 rows and 8 columns.</td></tr>
+  </table>
+  <div class="legend">
+    <span><span class="sw" style="background:var(--frozen)"></span>Frozen</span>
+    <span><span class="sw" style="background:var(--train)"></span>Trainable</span>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2>1. Full fine-tuning</h2>
+
+<p>Full fine-tuning changes all weights in the model. This method works. But it has three problems.</p>
+
+<h3>Problem 1: Training uses much memory</h3>
+<p>Inference keeps only the weights in memory. Training keeps more data for each weight:</p>
+<ul>
+  <li>The weight.</li>
+  <li>The gradient. This value tells training which direction to move the weight.</li>
+  <li>The optimizer state. The Adam optimizer keeps two more values for each weight.</li>
+</ul>
+<p>Thus, training needs approximately 3 to 4 times the memory of inference.</p>
+
+<svg viewBox="0 0 640 200" width="640">
+  <text x="10" y="40" font-size="14" font-weight="600">Inference</text>
+  <rect x="150" y="22" width="110" height="30" rx="4" fill="var(--frozen)"/>
+  <text x="205" y="42" font-size="12" text-anchor="middle" fill="#fff">weights</text>
+
+  <text x="10" y="100" font-size="14" font-weight="600">Full fine-tuning</text>
+  <rect x="150" y="82" width="110" height="30" rx="4" fill="var(--train)"/>
+  <text x="205" y="102" font-size="12" text-anchor="middle" fill="#fff">weights</text>
+  <rect x="262" y="82" width="110" height="30" rx="4" fill="#f08c4a"/>
+  <text x="317" y="102" font-size="12" text-anchor="middle" fill="#fff">gradients</text>
+  <rect x="374" y="82" width="220" height="30" rx="4" fill="#f5a86e"/>
+  <text x="484" y="102" font-size="12" text-anchor="middle" fill="#fff">optimizer state (×2)</text>
+  <text x="600" y="102" font-size="13" fill="var(--bad)" font-weight="600">≈4×</text>
+
+  <text x="10" y="160" font-size="14" font-weight="600">PEFT (LoRA)</text>
+  <rect x="150" y="142" width="110" height="30" rx="4" fill="var(--frozen)"/>
+  <text x="205" y="162" font-size="12" text-anchor="middle" fill="#fff">weights</text>
+  <rect x="262" y="142" width="10" height="30" rx="2" fill="var(--train)"/>
+  <text x="282" y="162" font-size="12" fill="var(--muted)">← adapter + its gradients + its optimizer state</text>
+  <text x="600" y="162" font-size="13" fill="var(--ok)" font-weight="600">≈1×</text>
+</svg>
+<p class="caption">Memory for weights and training data. (Activations also use memory. This diagram does not show them.)</p>
+
+<h3>Problem 2: Each fine-tuned version is a full copy</h3>
+<p>If you fine-tune for five tasks, you get five full models. You must store and serve each one.</p>
+
+<h3>Problem 3: The model can forget</h3>
+<p>All weights move toward your small dataset. The model can lose skills that it had before. This problem is <b>catastrophic forgetting</b>.</p>
+
+<!-- ============================================================ -->
+<h2>2. PEFT: Parameter-Efficient Fine-Tuning</h2>
+
+<p>PEFT uses a different method:</p>
+<ol>
+  <li>Freeze all weights in the base model.</li>
+  <li>Add a small number of new weights (the adapter).</li>
+  <li>Train only the adapter.</li>
+</ol>
+<p>The base model does not change.</p>
+
+<svg viewBox="0 0 660 260" width="660">
+  <!-- full FT -->
+  <text x="150" y="20" font-size="15" font-weight="600" text-anchor="middle">Full fine-tuning</text>
+  <g>
+    <rect x="70" y="35" width="160" height="34" rx="5" fill="var(--train)"/><text x="150" y="57" font-size="13" text-anchor="middle" fill="#fff">Layer 1</text>
+    <rect x="70" y="75" width="160" height="34" rx="5" fill="var(--train)"/><text x="150" y="97" font-size="13" text-anchor="middle" fill="#fff">Layer 2</text>
+    <rect x="70" y="115" width="160" height="34" rx="5" fill="var(--train)"/><text x="150" y="137" font-size="13" text-anchor="middle" fill="#fff">Layer 3</text>
+    <rect x="70" y="155" width="160" height="34" rx="5" fill="var(--train)"/><text x="150" y="177" font-size="13" text-anchor="middle" fill="#fff">Layer …</text>
+  </g>
+  <text x="150" y="220" font-size="13" text-anchor="middle" fill="var(--bad)">All weights change</text>
+  <text x="150" y="238" font-size="13" text-anchor="middle" fill="var(--muted)">100% trainable</text>
+
+  <!-- PEFT -->
+  <text x="480" y="20" font-size="15" font-weight="600" text-anchor="middle">PEFT</text>
+  <g>
+    <rect x="380" y="35" width="160" height="34" rx="5" fill="var(--frozen)"/><text x="460" y="57" font-size="13" text-anchor="middle" fill="#fff">Layer 1 🔒</text>
+    <rect x="546" y="40" width="40" height="24" rx="4" fill="var(--train)"/>
+    <rect x="380" y="75" width="160" height="34" rx="5" fill="var(--frozen)"/><text x="460" y="97" font-size="13" text-anchor="middle" fill="#fff">Layer 2 🔒</text>
+    <rect x="546" y="80" width="40" height="24" rx="4" fill="var(--train)"/>
+    <rect x="380" y="115" width="160" height="34" rx="5" fill="var(--frozen)"/><text x="460" y="137" font-size="13" text-anchor="middle" fill="#fff">Layer 3 🔒</text>
+    <rect x="546" y="120" width="40" height="24" rx="4" fill="var(--train)"/>
+    <rect x="380" y="155" width="160" height="34" rx="5" fill="var(--frozen)"/><text x="460" y="177" font-size="13" text-anchor="middle" fill="#fff">Layer … 🔒</text>
+    <rect x="546" y="160" width="40" height="24" rx="4" fill="var(--train)"/>
+  </g>
+  <text x="600" y="115" font-size="12" fill="var(--train)">adapters</text>
+  <text x="480" y="220" font-size="13" text-anchor="middle" fill="var(--ok)">Only adapters change</text>
+  <text x="480" y="238" font-size="13" text-anchor="middle" fill="var(--muted)">often 1–5% trainable (or less)</text>
+</svg>
+
+<h3>Benefits of PEFT</h3>
+<table>
+  <tr><th>Benefit</th><th>Why</th></tr>
+  <tr><td>Training memory is near inference memory</td><td>Frozen weights do not need gradients or optimizer state.</td></tr>
+  <tr><td>The adapter is small</td><td>It is often 1–5% of the model size. A file of a few MB is usual.</td></tr>
+  <tr><td>Many adapters can share one base model</td><td>You store one base model and many small adapters.</td></tr>
+  <tr><td>The model keeps its old skills</td><td>The base weights do not change.</td></tr>
+</table>
+
+<svg viewBox="0 0 660 230" width="660">
+  <text x="160" y="20" font-size="15" font-weight="600" text-anchor="middle">5 tasks with full fine-tuning</text>
+  <g fill="var(--train)">
+    <rect x="20" y="40" width="50" height="120" rx="5"/><rect x="77" y="40" width="50" height="120" rx="5"/>
+    <rect x="134" y="40" width="50" height="120" rx="5"/><rect x="191" y="40" width="50" height="120" rx="5"/>
+    <rect x="248" y="40" width="50" height="120" rx="5"/>
+  </g>
+  <g font-size="12" fill="#fff" text-anchor="middle">
+    <text x="45" y="105">Model</text><text x="102" y="105">Model</text><text x="159" y="105">Model</text><text x="216" y="105">Model</text><text x="273" y="105">Model</text>
+  </g>
+  <text x="160" y="190" font-size="13" text-anchor="middle" fill="var(--bad)">5 full copies</text>
+
+  <text x="500" y="20" font-size="15" font-weight="600" text-anchor="middle">5 tasks with PEFT</text>
+  <rect x="380" y="40" width="70" height="120" rx="5" fill="var(--frozen)"/>
+  <text x="415" y="98" font-size="12" fill="#fff" text-anchor="middle">Base</text>
+  <text x="415" y="114" font-size="12" fill="#fff" text-anchor="middle">model</text>
+  <g fill="var(--train)">
+    <rect x="490" y="42" width="30" height="16" rx="3"/><rect x="490" y="66" width="30" height="16" rx="3"/>
+    <rect x="490" y="90" width="30" height="16" rx="3"/><rect x="490" y="114" width="30" height="16" rx="3"/>
+    <rect x="490" y="138" width="30" height="16" rx="3"/>
+  </g>
+  <g stroke="var(--line)" stroke-width="1.5">
+    <line x1="450" y1="100" x2="490" y2="50"/><line x1="450" y1="100" x2="490" y2="74"/>
+    <line x1="450" y1="100" x2="490" y2="98"/><line x1="450" y1="100" x2="490" y2="122"/>
+    <line x1="450" y1="100" x2="490" y2="146"/>
+  </g>
+  <g font-size="12" fill="var(--muted)">
+    <text x="528" y="54">Task A adapter</text><text x="528" y="78">Task B adapter</text>
+    <text x="528" y="102">Task C adapter</text><text x="528" y="126">Task D adapter</text>
+    <text x="528" y="150">Task E adapter</text>
+  </g>
+  <text x="500" y="190" font-size="13" text-anchor="middle" fill="var(--ok)">1 base model + 5 small adapters</text>
+</svg>
+
+<!-- ============================================================ -->
+<h2>3. LoRA: Low-Rank Adaptation</h2>
+
+<p>LoRA is the most used PEFT method.</p>
+
+<h3>The main idea</h3>
+<p>Fine-tuning adds a <b>change</b> to each weight matrix. Call this change ΔW ("delta W").</p>
+<p>Research shows that ΔW is usually "low-rank." This means that ΔW has a simple structure. You can make it from two thin matrices. You multiply them together.</p>
+
+<div class="rule">
+  <b>Analogy.</b> A large spreadsheet can look complex. But if each row is a multiple of a small set of patterns, you only need to store the patterns and the multipliers. LoRA stores the patterns (A) and the multipliers (B).
+</div>
+
+<svg viewBox="0 0 700 330" width="700">
+  <!-- Full delta W -->
+  <text x="110" y="20" font-size="14" font-weight="600" text-anchor="middle">Full fine-tuning learns ΔW</text>
+  <rect x="20" y="40" width="180" height="180" fill="var(--train-bg)" stroke="var(--train)" stroke-width="2"/>
+  <text x="110" y="128" font-size="22" text-anchor="middle" fill="var(--train)" font-weight="600">ΔW</text>
+  <text x="110" y="150" font-size="12" text-anchor="middle" fill="var(--muted)">512 × 512</text>
+  <text x="110" y="245" font-size="13" text-anchor="middle">262,144 weights</text>
+
+  <text x="250" y="135" font-size="26" text-anchor="middle" fill="var(--muted)">≈</text>
+
+  <!-- B -->
+  <text x="490" y="20" font-size="14" font-weight="600" text-anchor="middle">LoRA learns B and A</text>
+  <rect x="300" y="40" width="22" height="180" fill="var(--train)" />
+  <text x="311" y="135" font-size="14" text-anchor="middle" fill="#fff" font-weight="600">B</text>
+  <text x="311" y="240" font-size="12" text-anchor="middle" fill="var(--muted)">512 × 8</text>
+  <text x="311" y="256" font-size="12" text-anchor="middle">4,096</text>
+
+  <text x="345" y="56" font-size="20" text-anchor="middle" fill="var(--muted)">×</text>
+
+  <!-- A -->
+  <rect x="370" y="40" width="180" height="22" fill="var(--train)" />
+  <text x="460" y="56" font-size="14" text-anchor="middle" fill="#fff" font-weight="600">A</text>
+  <text x="460" y="80" font-size="12" text-anchor="middle" fill="var(--muted)">8 × 512</text>
+  <text x="460" y="96" font-size="12" text-anchor="middle">4,096</text>
+
+  <!-- arrow to result -->
+  <text x="575" y="135" font-size="22" text-anchor="middle" fill="var(--muted)">=</text>
+  <rect x="600" y="80" width="90" height="90" fill="var(--train-bg)" stroke="var(--train)" stroke-dasharray="4 3" stroke-width="2"/>
+  <text x="645" y="122" font-size="15" text-anchor="middle" fill="var(--train)" font-weight="600">BA</text>
+  <text x="645" y="140" font-size="11" text-anchor="middle" fill="var(--muted)">512 × 512</text>
+
+  <text x="460" y="150" font-size="13" text-anchor="middle" fill="var(--muted)">r = 8 is the</text>
+  <text x="460" y="166" font-size="13" text-anchor="middle" fill="var(--muted)">thin dimension</text>
+
+  <text x="430" y="285" font-size="14" text-anchor="middle" font-weight="600">4,096 + 4,096 = 8,192 weights</text>
+  <text x="430" y="305" font-size="13" text-anchor="middle" fill="var(--ok)">262,144 ÷ 8,192 = 32× fewer</text>
+</svg>
+<p class="caption">BA has the same shape as ΔW. But B and A together have 32 times fewer weights.</p>
+
+<h3>How the model uses the adapter</h3>
+<p>The input goes on two paths. The model adds the two results.</p>
+
+<svg viewBox="0 0 640 250" width="640">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#52606d"/></marker>
+  </defs>
+  <circle cx="50" cy="125" r="24" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="2"/>
+  <text x="50" y="130" font-size="15" text-anchor="middle" font-weight="600">x</text>
+  <text x="50" y="170" font-size="12" text-anchor="middle" fill="var(--muted)">input</text>
+
+  <!-- top path -->
+  <path d="M74,115 L170,60" stroke="#52606d" stroke-width="2" fill="none" marker-end="url(#ar)"/>
+  <rect x="175" y="30" width="200" height="56" rx="6" fill="var(--frozen)"/>
+  <text x="275" y="55" font-size="15" text-anchor="middle" fill="#fff" font-weight="600">W  🔒</text>
+  <text x="275" y="74" font-size="12" text-anchor="middle" fill="#fff">base weight (frozen)</text>
+  <path d="M375,58 L470,112" stroke="#52606d" stroke-width="2" fill="none" marker-end="url(#ar)"/>
+
+  <!-- bottom path -->
+  <path d="M74,135 L170,185" stroke="#52606d" stroke-width="2" fill="none" marker-end="url(#ar)"/>
+  <rect x="175" y="165" width="50" height="44" rx="5" fill="var(--train)"/>
+  <text x="200" y="192" font-size="15" text-anchor="middle" fill="#fff" font-weight="600">A</text>
+  <path d="M225,187 L250,187" stroke="#52606d" stroke-width="2" marker-end="url(#ar)"/>
+  <rect x="254" y="165" width="50" height="44" rx="5" fill="var(--train)"/>
+  <text x="279" y="192" font-size="15" text-anchor="middle" fill="#fff" font-weight="600">B</text>
+  <path d="M304,187 L326,187" stroke="#52606d" stroke-width="2" marker-end="url(#ar)"/>
+  <rect x="330" y="165" width="45" height="44" rx="5" fill="#fff" stroke="var(--train)" stroke-width="2"/>
+  <text x="352" y="185" font-size="11" text-anchor="middle">× α/r</text>
+  <text x="352" y="200" font-size="10" text-anchor="middle" fill="var(--muted)">scale</text>
+  <text x="275" y="232" font-size="12" text-anchor="middle" fill="var(--muted)">adapter (trainable)</text>
+  <path d="M375,187 L470,138" stroke="#52606d" stroke-width="2" fill="none" marker-end="url(#ar)"/>
+
+  <!-- sum -->
+  <circle cx="490" cy="125" r="20" fill="#fff" stroke="#52606d" stroke-width="2"/>
+  <text x="490" y="132" font-size="20" text-anchor="middle">+</text>
+  <path d="M510,125 L560,125" stroke="#52606d" stroke-width="2" marker-end="url(#ar)"/>
+  <circle cx="590" cy="125" r="24" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="2"/>
+  <text x="590" y="130" font-size="15" text-anchor="middle" font-weight="600">h</text>
+  <text x="590" y="170" font-size="12" text-anchor="middle" fill="var(--muted)">output</text>
+</svg>
+<p class="caption">Output h = W·x + (α/r)·B·A·x &nbsp;=&nbsp; (W + (α/r)·BA)·x</p>
+
+<ul>
+  <li>W does not change. Training changes only A and B.</li>
+  <li>At the start of training, B is all zeros. Thus BA is zero, and the model behaves exactly like the base model.</li>
+  <li>For deployment, you can merge BA into W. Then inference has no extra cost.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>4. Configure the adapter</h2>
+
+<p>Four settings control the adapter.</p>
+
+<h3>r (rank)</h3>
+<p>r is the thin dimension of A and B. It sets the capacity of the adapter.</p>
+
+<svg viewBox="0 0 640 170" width="640">
+  <g text-anchor="middle" font-size="13">
+    <rect x="60" y="30" width="8" height="90" fill="var(--train)"/><rect x="72" y="30" width="90" height="8" fill="var(--train)"/>
+    <text x="110" y="145">r = 4</text><text x="110" y="162" fill="var(--muted)" font-size="12">4,096 weights</text>
+
+    <rect x="230" y="30" width="16" height="90" fill="var(--train)"/><rect x="250" y="30" width="90" height="16" fill="var(--train)"/>
+    <text x="285" y="145">r = 8</text><text x="285" y="162" fill="var(--muted)" font-size="12">8,192 weights</text>
+
+    <rect x="410" y="30" width="32" height="90" fill="var(--train)"/><rect x="446" y="30" width="90" height="32" fill="var(--train)"/>
+    <text x="475" y="145">r = 16</text><text x="475" y="162" fill="var(--muted)" font-size="12">16,384 weights</text>
+  </g>
+  <text x="590" y="70" font-size="12" fill="var(--muted)" text-anchor="middle">more capacity</text>
+  <text x="590" y="88" font-size="12" fill="var(--bad)" text-anchor="middle">more overfit risk</text>
+  <path d="M30,22 L600,22" stroke="var(--line)" stroke-width="1.5" marker-end="url(#ar)"/>
+</svg>
+<p class="caption">Each step doubles r. Each step doubles the adapter weights (for one 512 × 512 matrix).</p>
+
+<ul>
+  <li>Higher r: the adapter can learn more.</li>
+  <li>Higher r with a small dataset: the adapter can memorize the data (overfit).</li>
+  <li>Usual values: 4 to 16.</li>
+</ul>
+
+<h3>lora_alpha</h3>
+<p>lora_alpha scales the effect of the adapter. The real multiplier is <b>lora_alpha ÷ r</b>.</p>
+<ul>
+  <li>Set lora_alpha to r (multiplier = 1) or to 2 × r (multiplier = 2).</li>
+  <li>In the example below: 16 ÷ 8 = 2. The adapter output is doubled.</li>
+</ul>
+<div class="rule">If you change r, also change lora_alpha. Keep the same ratio. Then the adapter strength stays about the same.</div>
+
+<h3>target_modules</h3>
+<p>target_modules tells LoRA which layers get an adapter. Each attention layer has four projections: q (query), k (key), v (value), and o (output). For FLAN-T5, the usual choice is <code>["q", "v"]</code>.</p>
+
+<svg viewBox="0 0 640 170" width="640">
+  <rect x="40" y="20" width="560" height="120" rx="10" fill="#fff" stroke="var(--line)" stroke-width="2"/>
+  <text x="320" y="44" font-size="14" text-anchor="middle" font-weight="600">One attention layer</text>
+  <g font-size="16" text-anchor="middle" font-weight="600">
+    <rect x="80" y="62" width="100" height="50" rx="6" fill="var(--frozen)"/><text x="130" y="93" fill="#fff">q 🔒</text>
+    <rect x="80" y="62" width="100" height="10" rx="3" fill="var(--train)"/>
+    <rect x="205" y="62" width="100" height="50" rx="6" fill="var(--frozen)"/><text x="255" y="93" fill="#fff">k 🔒</text>
+    <rect x="330" y="62" width="100" height="50" rx="6" fill="var(--frozen)"/><text x="380" y="93" fill="#fff">v 🔒</text>
+    <rect x="330" y="62" width="100" height="10" rx="3" fill="var(--train)"/>
+    <rect x="455" y="62" width="100" height="50" rx="6" fill="var(--frozen)"/><text x="505" y="93" fill="#fff">o 🔒</text>
+  </g>
+  <text x="130" y="132" font-size="12" text-anchor="middle" fill="var(--train)">+ adapter</text>
+  <text x="380" y="132" font-size="12" text-anchor="middle" fill="var(--train)">+ adapter</text>
+  <text x="320" y="162" font-size="12" text-anchor="middle" fill="var(--muted)">target_modules=["q", "v"] → LoRA adds an adapter to q and v in every attention layer.</text>
+</svg>
+
+<h3>lora_dropout</h3>
+<p>Dropout sets some adapter inputs to zero at random during training. This prevents the adapter from memorizing the data.</p>
+<ul>
+  <li>Usual range: 0.0 to 0.1.</li>
+  <li>Use a higher value with a small dataset.</li>
+  <li>Dropout is active only during training. It is off during inference.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>5. The code</h2>
+
+<pre><span class="c"># Import the configuration class and the task types.</span>
+from peft import LoraConfig, TaskType
+
+lora_config = LoraConfig(
+    task_type=TaskType.SEQ_2_SEQ_LM,  <span class="c"># Model has an encoder and a decoder (FLAN-T5).</span>
+    r=8,                              <span class="c"># Thin dimension of A and B.</span>
+    lora_alpha=16,                    <span class="c"># Scale = 16 / 8 = 2.</span>
+    target_modules=["q", "v"],        <span class="c"># Add adapters to query and value projections.</span>
+    lora_dropout=0.05,                <span class="c"># Drop 5% of adapter inputs during training.</span>
+    bias="none"                       <span class="c"># Keep all bias terms frozen.</span>
+)</pre>
+
+<table>
+  <tr><th>Setting</th><th>Value</th><th>Effect</th></tr>
+  <tr><td><code>task_type</code></td><td><code>SEQ_2_SEQ_LM</code></td><td>Tells PEFT that the model has an encoder and a decoder. PEFT then puts adapters in both parts correctly.</td></tr>
+  <tr><td><code>r</code></td><td>8</td><td>Medium capacity. A good default.</td></tr>
+  <tr><td><code>lora_alpha</code></td><td>16</td><td>2 × r. The adapter output is multiplied by 2.</td></tr>
+  <tr><td><code>target_modules</code></td><td><code>["q", "v"]</code></td><td>Adapters on query and value only. This is the standard choice for T5.</td></tr>
+  <tr><td><code>lora_dropout</code></td><td>0.05</td><td>Light regularization.</td></tr>
+  <tr><td><code>bias</code></td><td><code>"none"</code></td><td>Bias terms stay frozen. This is standard.</td></tr>
+</table>
+
+<div class="warn">
+  <b>Note on the numbers.</b> The 512 × 512 example is a simplification. In FLAN-T5-small, the q and v projections are 512 × 384 (6 heads × 64). The idea is the same. With the config above, FLAN-T5-small gets approximately 340,000 trainable weights. That is less than 0.5% of the 77 million weights in the model.
+</div>
+
+<!-- ============================================================ -->
+<h2>Summary</h2>
+<ol>
+  <li>Full fine-tuning changes all weights. It uses much memory, makes full copies, and can cause forgetting.</li>
+  <li>PEFT freezes the base model. It trains only a small adapter.</li>
+  <li>LoRA is a PEFT method. It learns two thin matrices, B and A. Their product BA is the weight change.</li>
+  <li>The output is (W + (α/r)·BA)·x. W does not change.</li>
+  <li>r sets capacity. lora_alpha ÷ r sets strength. target_modules sets location. lora_dropout reduces overfitting.</li>
+</ol>
+
+</body>
+</html>
